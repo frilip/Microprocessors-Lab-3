@@ -7,6 +7,7 @@
 #include "gpio.h"
 #include "timer.h"
 #include <stdbool.h>
+#include "delay.h"
 
 
 /*
@@ -85,6 +86,9 @@ void clear_text(int lines){
 }
 
 
+void touch_sensor_isr(int status) {
+	uart_print("Don't touch me!\r\n");
+}
 
 
 /*      Interrupt Sevice Routine for LED blinking      */
@@ -93,11 +97,16 @@ void TIM2_IRQHandler(void) {
 	
 	if (TIM2->SR & TIM_SR_UIF) {	// Check if update interrupt flag is set
 		TIM2->SR &= ~TIM_SR_UIF;		// Clear the flag immediately
-		gpio_toggle(P_LED_R);
 	}
 }
 
-
+int observer(Pin pin, int state) {
+	while (gpio_get(pin) != state) {
+		;
+	}
+	
+	return 1;
+}
 
 int main() {
 	bool status_login = true;
@@ -126,10 +135,87 @@ int main() {
 	NVIC_EnableIRQ(TIM2_IRQn);
 	TIM2->CR1 |= TIM_CR1_CEN;	   // Start TIM2
 	
-	// Initialize LEDs
-	gpio_set_mode(P_LED_R, Output); // Set onboard LED pin to output
-	gpio_set(P_LED_R, LED_OFF);     // initialise to off
+	// Initialize the Touch sensor
+	// gpio_set_mode(PC_8, PullDown); // Set touch sensor out pin to PullDown (input)
+	// gpio_set_trigger(PC_8, Rising);
+	// gpio_set_callback(PC_8, touch_sensor_isr);
+	
+	// Initialize the DHT11 sensor
+	// char temp[100];
+	// DHT11_InitTypeDef *my_DHT11;
+	// DHT11_init(my_DHT11, PC_8);
+	/*
+	if (DHT11_ReadData(my_DHT11) == 2) {
+		uart_print("Ton hpiame...\r\n");
+	} else {
+		uart_print("Den ton hpiame...\r\n");
+	}
+	*/
+	// sprintf(temp, "Temperature: %f, Humidity: %f\r\n", my_DHT11->Temperature, my_DHT11->Humidity);
+	// uart_print(temp);
+	
+	
+	
+	
+	
+	uint8_t Bits = 0;
+	uint8_t Packets[DHT11_MAX_BYTE_PACKETS] = {0};
+	uint8_t PacketIndex = 0;
+	
+	gpio_set_mode(PC_8, Output);
+	// PULLING the Line to Low and waits for 20ms
+	gpio_set(PC_8, 0);
+	delay_ms(20);
+	// PULLING the Line to HIGH and waits for 40us
+	gpio_set(PC_8, 1);
+	delay_us(40);
 
+	// __disable_irq();
+	gpio_set_mode(PC_8, Input);
+
+	// If the Line is still HIGH, that means DHT11 is not responding
+	if(gpio_get(PC_8)) {
+		uart_print("ERROR!\r\n");
+	}
+	
+	delay_us(80);
+	// HIGH
+	if(!gpio_get(PC_8)) {
+		uart_print("TIMEOUT!\r\n");
+	}
+
+	delay_us(80);
+	// Now DHT11 have pulled the Line to HIGH, we will wait till it PULLS is to LOW
+	// which means the handshake is done
+	if(gpio_get(PC_8)) {
+		uart_print("TIMEOUT!\r\n");
+	}
+	
+	while(Bits < 40) {
+		// DHT11 is now starting to transmit One Bit
+		// We will wait till it PULL the Line to HIGH
+		if(!DHT11_ObserveState(DHT11, GPIO_PIN_SET)) {
+			__enable_irq();
+			return DHT11_TIMEOUT;
+		}
+
+		// Now we will just count the us it stays HIGH
+		// 28us means 0
+		// 70us means 1
+		__HAL_TIM_SET_COUNTER(DHT11->_Tim, 0);
+		while(HAL_GPIO_ReadPin(DHT11->_GPIOx, DHT11->_Pin) == GPIO_PIN_SET) {
+			if(__HAL_TIM_GET_COUNTER(DHT11->_Tim) > DHT11_MAX_TIMEOUT) {
+				return DHT11_TIMEOUT;
+			}
+		}
+
+		Packets[PacketIndex] = Packets[PacketIndex] << 1;
+		Packets[PacketIndex] |= (__HAL_TIM_GET_COUNTER(DHT11->_Tim) > 50); // 50us is good in between
+		Bits++;
+		if(!(Bits % 8)) PacketIndex++;
+	}
+
+	/*
 	while(1) {
 		
 		// Prompt the user to enter the password
@@ -178,4 +264,5 @@ int main() {
 			uart_print("Stop trying to overflow my buffer! I resent that!\r\n");
 		}
 	}
+	*/
 }
