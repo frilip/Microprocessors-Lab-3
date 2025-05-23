@@ -117,63 +117,14 @@ int observer(Pin pin, int state) {
 	return 0;
 }
 
-int main() {
-	bool status_login = true;
-	
-	// Variables to help with UART read / write
-	uint8_t rx_char = 0;
-	
-	// Initialize the receive queue and UART
-	queue_init(&rx_queue, 128);
-	uart_init(115200);
-	uart_set_rx_callback(uart_rx_isr); // Set the UART receive callback function
-	uart_enable(); // Enable UART module
-	
-	__enable_irq(); // Enable interrupts
-	
-	uart_print("\r\n");// Print newline
-	
-	
-	// Initialize the led interrupt timer
-	RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;  // Enable clock for TIM2
-	// set the amount of ticks relative to the clock speed
-	TIM2->PSC = 15999;  // Prescaler: divide 16 MHz by 16000 = 1 kHz
-	TIM2->ARR = 9999;   // Auto-reload: 200 ticks at 1 kHz = 200 ms
-	TIM2->DIER |= TIM_DIER_UIE;     // Enable update interrupt (overflow interrupt)
-	NVIC_SetPriority(TIM2_IRQn, 3);  // set the priority 
-	NVIC_EnableIRQ(TIM2_IRQn);
-	TIM2->CR1 |= TIM_CR1_CEN;	   // Start TIM2
-	
-	// Initialize the Touch sensor
-	// gpio_set_mode(PC_8, PullDown); // Set touch sensor out pin to PullDown (input)
-	// gpio_set_trigger(PC_8, Rising);
-	// gpio_set_callback(PC_8, touch_sensor_isr);
-	
-	// Initialize the DHT11 sensor
-	char temp[100];
-	// DHT11_InitTypeDef *my_DHT11;
-	// DHT11_init(my_DHT11, PC_8);
-	/*
-	if (DHT11_ReadData(my_DHT11) == 2) {
-		uart_print("Ton hpiame...\r\n");
-	} else {
-		uart_print("Den ton hpiame...\r\n");
-	}
-	*/
-	// sprintf(temp, "Temperature: %f, Humidity: %f\r\n", my_DHT11->Temperature, my_DHT11->Humidity);
-	// uart_print(temp);
-	
-	
-	
-	
-	
+void DHT11_read_data(Pin pin) {
 	uint8_t Bits = 0;
 	uint8_t Packets[DHT11_MAX_BYTE_PACKETS] = {0};
-	int states[40] = {0};
 	uint8_t PacketIndex = 0;
 	uint8_t state_time;
-	float Humidity;
-	float Temperature;
+	float humidity;
+	float temperature;
+	char display_message[100];
 	
 	gpio_set_mode(PC_8, Output);
 	// PULLING the Line to Low and waits for 20ms
@@ -220,7 +171,6 @@ int main() {
 		// 28us means 0
 		// 70us means 1
 		state_time = 2 * observer(PC_8, 0);
-		states[Bits] = state_time;
 		if(!(state_time)) {
 			uart_print("TIMEOUT 2!\r\n");
 		}
@@ -236,16 +186,49 @@ int main() {
 		uart_print("MISMATCH!\r\n");
 	}
 
-	Humidity = Packets[0] + (Packets[1] * 0.1f);
-	Temperature = Packets[2] + (Packets[3] * 0.1f);
-	sprintf(temp, "Humidity: %f, Temperature: %f\r\n", Humidity, Temperature);
-	uart_print(temp);
+	humidity = Packets[0] + (Packets[1] * 0.1f);
+	temperature = Packets[2] + (Packets[3] * 0.1f);
+	sprintf(display_message, "Humidity: %f, Temperature: %f\r\n", humidity, temperature);
+	uart_print(display_message);
+}
+
+int main() {
+	bool status_login = true;
 	
-	for (int i; i < 40; i++) {
-		sprintf(temp, "%d ", states[i]);
-		uart_print(temp);
+	// Variables to help with UART read / write
+	uint8_t rx_char = 0;
+	
+	// Initialize the receive queue and UART
+	queue_init(&rx_queue, 128);
+	uart_init(115200);
+	uart_set_rx_callback(uart_rx_isr); // Set the UART receive callback function
+	uart_enable(); // Enable UART module
+	
+	__enable_irq(); // Enable interrupts
+	
+	uart_print("\r\n");// Print newline
+	
+	
+	// Initialize the led interrupt timer
+	RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;  // Enable clock for TIM2
+	// set the amount of ticks relative to the clock speed
+	TIM2->PSC = 15999;  // Prescaler: divide 16 MHz by 16000 = 1 kHz
+	TIM2->ARR = 9999;   // Auto-reload: 200 ticks at 1 kHz = 200 ms
+	TIM2->DIER |= TIM_DIER_UIE;     // Enable update interrupt (overflow interrupt)
+	NVIC_SetPriority(TIM2_IRQn, 3);  // set the priority 
+	NVIC_EnableIRQ(TIM2_IRQn);
+	TIM2->CR1 |= TIM_CR1_CEN;	   // Start TIM2
+	
+	// Initialize the Touch sensor
+	// gpio_set_mode(PC_8, PullDown); // Set touch sensor out pin to PullDown (input)
+	// gpio_set_trigger(PC_8, Rising);
+	// gpio_set_callback(PC_8, touch_sensor_isr);
+	
+	while(1) {
+		
+		DHT11_read_data(PC_8);
+		delay_ms(1000);
 	}
-	uart_print("\r\n");
 	
 	/*
 	while(1) {
