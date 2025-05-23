@@ -19,6 +19,7 @@
 /*         UART variable definitions         */
 #define BUFF_SIZE 128 //read buffer length
 #define MENU_LINES 6
+#define MAX_STATE_TIME 700
 
 struct menu_text {
 	const char *text;
@@ -101,11 +102,19 @@ void TIM2_IRQHandler(void) {
 }
 
 int observer(Pin pin, int state) {
-	while (gpio_get(pin) != state) {
-		;
+	unsigned int n;
+	char temp[50];
+	
+	n = 0;
+	while (n < MAX_STATE_TIME) {
+		delay_us(2);
+		n++;
+		if ((state && gpio_get(pin) > 0) || (!state && !gpio_get(pin))) {
+			return n;
+		}
 	}
 	
-	return 1;
+	return 0;
 }
 
 int main() {
@@ -141,7 +150,7 @@ int main() {
 	// gpio_set_callback(PC_8, touch_sensor_isr);
 	
 	// Initialize the DHT11 sensor
-	// char temp[100];
+	char temp[100];
 	// DHT11_InitTypeDef *my_DHT11;
 	// DHT11_init(my_DHT11, PC_8);
 	/*
@@ -160,7 +169,11 @@ int main() {
 	
 	uint8_t Bits = 0;
 	uint8_t Packets[DHT11_MAX_BYTE_PACKETS] = {0};
+	int states[40] = {0};
 	uint8_t PacketIndex = 0;
+	uint8_t state_time;
+	float Humidity;
+	float Temperature;
 	
 	gpio_set_mode(PC_8, Output);
 	// PULLING the Line to Low and waits for 20ms
@@ -178,43 +191,62 @@ int main() {
 		uart_print("ERROR!\r\n");
 	}
 	
-	delay_us(80);
-	// HIGH
-	if(!gpio_get(PC_8)) {
-		uart_print("TIMEOUT!\r\n");
+	// Wait for HIGH
+	if(!observer(PC_8, 1)) {
+		uart_print("TIMEOUT OUTSIDE 1!\r\n");
 	}
 
-	delay_us(80);
 	// Now DHT11 have pulled the Line to HIGH, we will wait till it PULLS is to LOW
 	// which means the handshake is done
-	if(gpio_get(PC_8)) {
-		uart_print("TIMEOUT!\r\n");
+	if(!observer(PC_8, 0)) {
+		uart_print("TIMEOUT OUTSIDE 2!\r\n");
 	}
 	
+	// WE ARE LOW HERE
 	while(Bits < 40) {
+		/*
+		if (!gpio_get(PC_8)) {
+			uart_print("LOW\r\n");
+		}
+		*/
 		// DHT11 is now starting to transmit One Bit
 		// We will wait till it PULL the Line to HIGH
-		if(!DHT11_ObserveState(DHT11, GPIO_PIN_SET)) {
-			__enable_irq();
-			return DHT11_TIMEOUT;
+		// uart_tx('-');
+		if(!observer(PC_8, 1)) {
+			uart_print("TIMEOUT 1!\r\n");
 		}
 
 		// Now we will just count the us it stays HIGH
 		// 28us means 0
 		// 70us means 1
-		__HAL_TIM_SET_COUNTER(DHT11->_Tim, 0);
-		while(HAL_GPIO_ReadPin(DHT11->_GPIOx, DHT11->_Pin) == GPIO_PIN_SET) {
-			if(__HAL_TIM_GET_COUNTER(DHT11->_Tim) > DHT11_MAX_TIMEOUT) {
-				return DHT11_TIMEOUT;
-			}
+		state_time = 2 * observer(PC_8, 0);
+		states[Bits] = state_time;
+		if(!(state_time)) {
+			uart_print("TIMEOUT 2!\r\n");
 		}
 
 		Packets[PacketIndex] = Packets[PacketIndex] << 1;
-		Packets[PacketIndex] |= (__HAL_TIM_GET_COUNTER(DHT11->_Tim) > 50); // 50us is good in between
+		Packets[PacketIndex] |= (state_time > 10); // 50us is good in between
 		Bits++;
 		if(!(Bits % 8)) PacketIndex++;
 	}
+	
+	// Last 8 bits are Checksum, which is the sum of all the previously transmitted 4 bytes
+	if(Packets[4] != (Packets[0] + Packets[1] + Packets[2] + Packets[3])) {
+		uart_print("MISMATCH!\r\n");
+	}
 
+	Humidity = Packets[0] + (Packets[1] * 0.1f);
+	Temperature = Packets[2] + (Packets[3] * 0.1f);
+	sprintf(temp, "Humidity: %f, Temperature: %f\r\n", Humidity, Temperature);
+	uart_print(temp);
+	
+	for (int i; i < 40; i++) {
+		sprintf(temp, "%d ", states[i]);
+		uart_print(temp);
+	}
+	uart_print("\r\n");
+	
 	/*
 	while(1) {
 		

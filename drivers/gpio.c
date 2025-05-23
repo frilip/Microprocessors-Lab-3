@@ -427,6 +427,7 @@ DHT11_StatusTypeDef DHT11_ReadData(DHT11_InitTypeDef *DHT11) {
 	// 		return DHT11_TIMEOUT;
 	// }
 
+	/*
 	while(Bits < 40) {
 			// DHT11 is now starting to transmit One Bit
 			// We will wait till it PULL the Line to HIGH
