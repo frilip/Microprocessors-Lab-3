@@ -9,6 +9,12 @@
 #ifndef PINS_H
 #define PINS_H
 
+#define DHT11_PIN_OUTPUT 0
+#define DHT11_PIN_INPUT 1
+#define DHT11_MAX_DATA_BITS 40
+#define DHT11_MAX_BYTE_PACKETS 5
+#define DHT11_MAX_TIMEOUT 100
+
 #include "platform.h"
 
 /*! This enum describes the directional setup of a GPIO pin. */
@@ -94,6 +100,39 @@ void gpio_set_trigger(Pin pin, TriggerMode trig);
  *  \param callback  Callback function.
  */
 void gpio_set_callback(Pin pin, void (*callback)(int status));
+
+// ********************** DHT11 ************************* //
+typedef enum {
+    DHT11_OK = 0,
+    DHT11_TIMEOUT,
+    DHT11_ERROR,
+    DHT11_CHECKSUM_MISMATCH,
+    __DHT11_STATUS_TYPEDEF_COUNT__
+} DHT11_StatusTypeDef;
+
+typedef struct {
+    float Temperature;
+    float Humidity;
+    DHT11_StatusTypeDef Status;
+    int _Pin;
+} DHT11_InitTypeDef;
+
+/**
+  * @brief  Intitalizes the DHT11 Driver.
+  * @param    DHT11 instance of a DHT11 driver.
+  * @param  GPIOx where x can be (A..G) to select the GPIO peripheral for STM32xxxx family.
+  * @param  GPIO_Pin specifies the pin DHT11 is connected.
+  * @param     TIM handler for timer with frequency to count 1us.
+  * @retval None
+  */
+void DHT11_init(DHT11_InitTypeDef *DHT11, int GPIO_Pin);
+
+/**
+  * @brief  Reads data(Temperature, Humidity) from the DHT11 Driver.
+  * @param    DHT11 instance of a DHT11 driver.
+  * @retval DHT11_StatusTypeDef
+  */
+DHT11_StatusTypeDef DHT11_ReadData(DHT11_InitTypeDef *DHT11);
 
 #endif // PINS_H
 

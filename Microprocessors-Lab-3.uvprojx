@@ -16,7 +16,7 @@
         <TargetCommonOption>
           <Device>STM32F411RETx</Device>
           <Vendor>STMicroelectronics</Vendor>
-          <PackID>Keil.STM32F4xx_DFP.2.17.0</PackID>
+          <PackID>Keil.STM32F4xx_DFP.2.17.1</PackID>
           <PackURL>https://www.keil.com/pack/</PackURL>
           <Cpu>IRAM(0x20000000,0x00020000) IROM(0x08000000,0x00080000) CPUTYPE("Cortex-M4") FPU2 CLOCK(12000000) ELITTLE</Cpu>
           <FlashUtilSpec></FlashUtilSpec>
@@ -389,11 +389,6 @@
               <FileType>1</FileType>
               <FilePath>.\main.c</FilePath>
             </File>
-            <File>
-              <FileName>hasher.s</FileName>
-              <FileType>2</FileType>
-              <FilePath>.\hasher.s</FilePath>
-            </File>
           </Files>
         </Group>
         <Group>
@@ -455,6 +450,11 @@
               <FilePath>.\drivers\platform.h</FilePath>
             </File>
             <File>
+              <FileName>stm32f4xx_rcc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\drivers\stm32f4xx_rcc.c</FilePath>
+            </File>
+            <File>
               <FileName>queue.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\drivers\queue.c</FilePath>
@@ -493,11 +493,6 @@
               <FileName>stm32f4xx_i2c.h</FileName>
               <FileType>5</FileType>
               <FilePath>.\drivers\stm32f4xx_i2c.h</FilePath>
-            </File>
-            <File>
-              <FileName>stm32f4xx_rcc.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>.\drivers\stm32f4xx_rcc.c</FilePath>
             </File>
             <File>
               <FileName>stm32f4xx_rcc.h</FileName>
@@ -552,6 +547,51 @@
           </Files>
         </Group>
         <Group>
+          <GroupName>DHT11</GroupName>
+          <Files>
+            <File>
+              <FileName>driver_dht11.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\driver_dht11.h</FilePath>
+            </File>
+            <File>
+              <FileName>driver_dht11.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\driver_dht11.c</FilePath>
+            </File>
+            <File>
+              <FileName>driver_dht11_basic.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\driver_dht11_basic.c</FilePath>
+            </File>
+            <File>
+              <FileName>driver_dht11_basic.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\driver_dht11_basic.h</FilePath>
+            </File>
+            <File>
+              <FileName>driver_dht11_interface.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\driver_dht11_interface.h</FilePath>
+            </File>
+            <File>
+              <FileName>driver_dht11_interface_template.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\driver_dht11_interface_template.c</FilePath>
+            </File>
+            <File>
+              <FileName>DHT11_custom.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\DHT11_custom.c</FilePath>
+            </File>
+            <File>
+              <FileName>DHT11_custom.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\DHT11_custom.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
           <GroupName>::CMSIS</GroupName>
         </Group>
         <Group>
@@ -581,7 +621,7 @@
       <file attr="config" category="source" condition="STM32F411xE_ARMCC" name="Drivers\CMSIS\Device\ST\STM32F4xx\Source\Templates\arm\startup_stm32f411xe.s" version="2.6.8">
         <instance index="0">RTE\Device\STM32F411RETx\startup_stm32f411xe.s</instance>
         <component Cclass="Device" Cgroup="Startup" Cvendor="Keil" Cversion="2.6.3" condition="STM32F4 CMSIS"/>
-        <package name="STM32F4xx_DFP" schemaVersion="1.7.2" url="https://www.keil.com/pack/" vendor="Keil" version="2.17.0"/>
+        <package name="STM32F4xx_DFP" schemaVersion="1.7.2" url="https://www.keil.com/pack/" vendor="Keil" version="2.17.1"/>
         <targetInfos>
           <targetInfo name="Target 1"/>
         </targetInfos>
@@ -589,7 +629,7 @@
       <file attr="config" category="source" name="Drivers\CMSIS\Device\ST\STM32F4xx\Source\Templates\system_stm32f4xx.c" version="2.6.8">
         <instance index="0">RTE\Device\STM32F411RETx\system_stm32f4xx.c</instance>
         <component Cclass="Device" Cgroup="Startup" Cvendor="Keil" Cversion="2.6.3" condition="STM32F4 CMSIS"/>
-        <package name="STM32F4xx_DFP" schemaVersion="1.7.2" url="https://www.keil.com/pack/" vendor="Keil" version="2.17.0"/>
+        <package name="STM32F4xx_DFP" schemaVersion="1.7.2" url="https://www.keil.com/pack/" vendor="Keil" version="2.17.1"/>
         <targetInfos>
           <targetInfo name="Target 1"/>
         </targetInfos>

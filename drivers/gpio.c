@@ -1,5 +1,8 @@
 #include "platform.h"
 #include "gpio.h"
+#include "delay.h"
+#include "uart.h"
+#include <stdio.h>
 
 uint32_t IRQ_status;
 uint32_t IRQ_port_num;
@@ -351,6 +354,116 @@ void EXTI15_10_IRQHandler(void){
 	// 	GPIO_callback(IRQ_pin_index);
 	// }
 	
+}
+
+// ****************** DHT11 *********************** //
+
+void DHT11_init(DHT11_InitTypeDef *DHT11, int GPIO_Pin) {
+	DHT11->_Pin = GPIO_Pin;
+	DHT11->Temperature = 0.0f;
+	DHT11->Humidity = 0.0f;
+}
+
+/*
+void HAL_DHT11_DeInit(DHT11_InitTypeDef *DHT11) {
+	HAL_GPIO_DeInit(DHT11->_GPIOx, DHT11->_Pin);
+	HAL_TIM_Base_Stop(DHT11->_Tim);
+}*/
+
+/*
+const char* const HAL_DHT11_GetErrorMsg(DHT11_StatusTypeDef Status) {
+	return ErrorMsg[Status];
+}
+*/
+
+/*
+static bool DHT11_ObserveState(DHT11_InitTypeDef *DHT11, uint8_t FinalState) {
+	__HAL_TIM_SET_COUNTER(DHT11->_Tim, 0);
+	while(__HAL_TIM_GET_COUNTER(DHT11->_Tim) < DHT11_MAX_TIMEOUT) {
+		if(HAL_GPIO_ReadPin(DHT11->_GPIOx, DHT11->_Pin) == FinalState) return true;
+	}
+
+	return false;
+}
+*/
+
+DHT11_StatusTypeDef DHT11_ReadData(DHT11_InitTypeDef *DHT11) {
+	uint8_t Bits = 0;
+	uint8_t Packets[DHT11_MAX_BYTE_PACKETS] = {0};
+	uint8_t PacketIndex = 0;
+
+	// char temp[100];
+	// sprintf(temp, "%d\r\n", DHT11->_Pin);
+	// uart_print(temp);
+	
+	gpio_set_mode(DHT11->_Pin, Output);
+	// PULLING the Line to Low and waits for 20ms
+	gpio_set(DHT11->_Pin, 0);
+	delay_ms(20);
+	// PULLING the Line to HIGH and waits for 40us
+	gpio_set(DHT11->_Pin, 1);
+	delay_us(40);
+
+	// __disable_irq();
+	gpio_set_mode(DHT11->_Pin, Input);
+
+	// If the Line is still HIGH, that means DHT11 is not responding
+	if(gpio_get(DHT11->_Pin)) {
+		// __enable_irq();
+		return DHT11_ERROR;
+	}
+
+
+	// Now DHT11 have pulled the Line to LOW, we will wait till it PULLS is HIGH
+	// if(!DHT11_ObserveState(DHT11, GPIO_PIN_SET)) {
+	// 	__enable_irq();
+	// 	return DHT11_TIMEOUT;
+	// }
+
+	// Now DHT11 have pulled the Line to HIGH, we will wait till it PULLS is to LOW
+	// which means the handshake is done
+	// if(!DHT11_ObserveState(DHT11, GPIO_PIN_RESET)) {
+	// 		__enable_irq();
+	// 		return DHT11_TIMEOUT;
+	// }
+
+	/*
+	while(Bits < 40) {
+			// DHT11 is now starting to transmit One Bit
+			// We will wait till it PULL the Line to HIGH
+			if(!DHT11_ObserveState(DHT11, GPIO_PIN_SET)) {
+				__enable_irq();
+				return DHT11_TIMEOUT;
+			}
+
+			// Now we will just count the us it stays HIGH
+			// 28us means 0
+			// 70us means 1
+			__HAL_TIM_SET_COUNTER(DHT11->_Tim, 0);
+			while(HAL_GPIO_ReadPin(DHT11->_GPIOx, DHT11->_Pin) == GPIO_PIN_SET) {
+				if(__HAL_TIM_GET_COUNTER(DHT11->_Tim) > DHT11_MAX_TIMEOUT) {
+					return DHT11_TIMEOUT;
+				}
+			}
+
+			Packets[PacketIndex] = Packets[PacketIndex] << 1;
+			Packets[PacketIndex] |= (__HAL_TIM_GET_COUNTER(DHT11->_Tim) > 50); // 50us is good in between
+			Bits++;
+			if(!(Bits % 8)) PacketIndex++;
+	}
+
+	__enable_irq();
+
+	// Last 8 bits are Checksum, which is the sum of all the previously transmitted 4 bytes
+	if(Packets[4] != (Packets[0] + Packets[1] + Packets[2] + Packets[3])) {
+		return DHT11_CHECKSUM_MISMATCH;
+	}
+
+	DHT11->Humidity = Packets[0] + (Packets[1] * 0.1f);
+	DHT11->Temperature = Packets[2] + (Packets[3] * 0.1f);
+	*/
+
+	return DHT11_OK;
 }
 
 
