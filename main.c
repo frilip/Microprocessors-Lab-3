@@ -18,20 +18,23 @@
 
 /*         UART variable definitions         */
 #define BUFF_SIZE 128 //read buffer length
-#define MENU_LINES 6
+#define MENU_LINES 7
 #define MAX_STATE_TIME 700
 
 struct menu_text {
 	const char *text;
 };
 
-struct menu_text test[4] = {"1.", "2.", "3.", "4."};
+struct menu_text test[4] = {"1. Increase period of read/write data by 1s (max 10s).", 
+														"2. Decrease period of read/write data by 1s (min 2s.)",
+														"3. Switch between temperature/ humidity/ both.",
+														"4. Print current data and System Mode."};
 const char* password = "password";
-const char* menu = "==== Environmental System ====\r\nOptions:\r\n";
+const char* menu = "                ==== Environmental System ====\r\nOptions:\r\n";
 const char* highlight_front = "\033[43;30m";
 const char* highlight_back = "\033[0m";
-char display_message [100];
-uint8_t selection = 1;
+char display_message [1000];
+
 
 Queue rx_queue;       // Queue for storing received characters
 char buff[BUFF_SIZE]; // The UART read string will be stored here
@@ -47,10 +50,10 @@ void uart_rx_isr(uint8_t rx) {
 	}
 }
 
-void uart_menu() {
+void uart_menu(uint8_t selection, bool highlight) {
 	strcat(display_message, menu);
 	for (int i = 0; i < 4; i++) {
-		if (i == selection) {
+		if (i == selection && highlight) {
 			strcat(display_message, highlight_front);
 			strcat(display_message, test[i].text);
 			strcat(display_message, highlight_back);
@@ -59,6 +62,7 @@ void uart_menu() {
 		}
 		strcat(display_message, "\r\n");
 	}
+	strcat(display_message, "\n\n");
 	strcat(display_message, "Command: ");
 	uart_print(display_message);
 	
@@ -80,9 +84,8 @@ bool check_password(const char * buff){
 void clear_text(int lines){
 	
 	for (int i = 0; i < lines; i++) {
-		uart_print("\033[A\r            ");
+		uart_print("\033[A\r");
 	}
-	uart_tx('\r');
 	display_message[0] = '\0';
 }
 
@@ -92,18 +95,10 @@ void touch_sensor_isr(int status) {
 }
 
 
-/*      Interrupt Sevice Routine for LED blinking      */
-void TIM2_IRQHandler(void) {
-	// toggle the LED every 200ms
-	
-	if (TIM2->SR & TIM_SR_UIF) {	// Check if update interrupt flag is set
-		TIM2->SR &= ~TIM_SR_UIF;		// Clear the flag immediately
-	}
-}
 
 int observer(Pin pin, int state) {
 	unsigned int n;
-	char temp[50];
+	
 	
 	n = 0;
 	while (n < MAX_STATE_TIME) {
@@ -185,15 +180,41 @@ void DHT11_read_data(Pin pin) {
 	if(Packets[4] != (Packets[0] + Packets[1] + Packets[2] + Packets[3])) {
 		uart_print("MISMATCH!\r\n");
 	}
-
+	
+	
 	humidity = Packets[0] + (Packets[1] * 0.1f);
 	temperature = Packets[2] + (Packets[3] * 0.1f);
 	sprintf(display_message, "Humidity: %f, Temperature: %f\r\n", humidity, temperature);
+	
+	// print in correct place
+	uart_print("\033[A\r                            ");
 	uart_print(display_message);
+	for (int i = 0; i < buff_index + 9; i++) {
+		uart_print("\033[1C");
+	}
 }
+
+
+
+
+/*      Interrupt Sevice Routine for reading DHT11      */
+void TIM2_IRQHandler(void) {
+	DHT11_read_data(PC_8);
+	
+	if (TIM2->SR & TIM_SR_UIF) {	// Check if update interrupt flag is set
+		TIM2->SR &= ~TIM_SR_UIF;		// Clear the flag immediately
+	}
+}
+
+
+
+
+
+
 
 int main() {
 	bool status_login = true;
+	uint8_t selection = 1;
 	
 	// Variables to help with UART read / write
 	uint8_t rx_char = 0;
@@ -209,40 +230,18 @@ int main() {
 	uart_print("\r\n");// Print newline
 	
 	
-	// Initialize the led interrupt timer
-	RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;  // Enable clock for TIM2
-	// set the amount of ticks relative to the clock speed
-	TIM2->PSC = 15999;  // Prescaler: divide 16 MHz by 16000 = 1 kHz
-	TIM2->ARR = 9999;   // Auto-reload: 200 ticks at 1 kHz = 200 ms
-	TIM2->DIER |= TIM_DIER_UIE;     // Enable update interrupt (overflow interrupt)
-	NVIC_SetPriority(TIM2_IRQn, 3);  // set the priority 
-	NVIC_EnableIRQ(TIM2_IRQn);
-	TIM2->CR1 |= TIM_CR1_CEN;	   // Start TIM2
 	
 	// Initialize the Touch sensor
 	// gpio_set_mode(PC_8, PullDown); // Set touch sensor out pin to PullDown (input)
 	// gpio_set_trigger(PC_8, Rising);
 	// gpio_set_callback(PC_8, touch_sensor_isr);
 	
-	while(1) {
-		
-		DHT11_read_data(PC_8);
-		delay_ms(1000);
-	}
+
+	uart_print("Enter your password: ");
 	
-	/*
 	while(1) {
 		
-		// Prompt the user to enter the password
-		if (status_login && check_password(buff)){
-			status_login = false;
-			uart_print("Succesful Login\r\n");
-			buff_index = 0; // Reset buffer index
-			uart_menu();
-		} else if (status_login) {
-			uart_print("Enter your password: ");
-		}
-		
+
 		buff_index = 0; // Reset buffer index
 		
 		do {
@@ -250,13 +249,16 @@ int main() {
 			while (!queue_dequeue(&rx_queue, &rx_char))
 				__WFI(); // Wait for Interrupt
 			
-			if (rx_char == 0x9 && !status_login) {
-				clear_text(MENU_LINES);
+			if (rx_char == 0x9 && !status_login && buff_index == 0) {
+				__disable_irq();
+				clear_text(MENU_LINES + 1);
 				selection = (selection + 1) % 4;
-				uart_menu();
+				uart_menu(selection, 1);
+				__enable_irq();
 				continue;
 			}
-
+			
+			
 			if (rx_char == 0x7F) { // Handle backspace character
 				if (buff_index > 0) {
 					buff_index--; // Move buffer index back
@@ -266,18 +268,70 @@ int main() {
 				// Store and echo the received character back
 				buff[buff_index++] = (char)rx_char; // Store digit or dash in buffer
 				uart_tx(rx_char); // Echo digit or dash back to terminal
+				
+				if (!status_login){
+					// update menu, hide highlight
+					__disable_irq();
+					clear_text(MENU_LINES + 1);
+					uart_menu(selection, 0);
+					__enable_irq();
+				}
+				
 			}
 		} while (rx_char != '\r' && buff_index < BUFF_SIZE); // Continue until Enter key or buffer full
 		
 		// Replace the last character with null terminator to make it a valid C string
 		buff[buff_index - 1] = '\0';
-		uart_print("\r\n"); // Print newline
-		uart_print(buff);
+		
+		// STATUS ACTION HERE
+		
+		// unwrite command
+		for (int i=0; i<buff_index; i++){
+			uart_tx(0x7F);
+		}
+		buff_index = 0;
+
+		// uart_print(buff);
+		
+		
+		if (!status_login){
+			// update menu, show higlight
+			__disable_irq();
+			clear_text(MENU_LINES + 1);
+			uart_menu(selection, 1);
+			__enable_irq();
+		}
 		
 		// Check if buffer overflow occurred
 		if (buff_index >= BUFF_SIZE) {
 			uart_print("Stop trying to overflow my buffer! I resent that!\r\n");
 		}
+		
+		
+		
+		// Check password
+		if (status_login && check_password(buff)){
+			status_login = false;
+			//uart_print("Succesful Login\r\n");
+			uart_print("\r                                                  \r");
+			buff_index = 0; // Reset buffer index
+			uart_menu(1, 1);
+			
+			// enable temprerature interupt
+			RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;  // Enable clock for TIM2
+			// set the amount of ticks relative to the clock speed
+			TIM2->PSC = 15999;  // Prescaler: divide 16 MHz by 16000 = 1 kHz
+			TIM2->ARR = 5999;   // Auto-reload: 6000 ticks at 1 kHz = 6s
+			TIM2->DIER |= TIM_DIER_UIE;     // Enable update interrupt (overflow interrupt)
+			NVIC_SetPriority(TIM2_IRQn, 3);  // set the priority 
+			NVIC_EnableIRQ(TIM2_IRQn);
+			TIM2->CR1 |= TIM_CR1_CEN;	   // Start TIM2
+			
+		} else if (status_login) {
+			uart_print("\r                                                  \r");
+			uart_print("Enter your password: ");
+		}
+		
 	}
-	*/
+	
 }
