@@ -39,6 +39,16 @@ char display_message [1000];
 Queue rx_queue;       // Queue for storing received characters
 char buff[BUFF_SIZE]; // The UART read string will be stored here
 uint32_t buff_index;
+														
+uint8_t reading_period = 6;
+														
+enum DHT11_output_options {
+	BOTH = 0,
+	FREQUENCY,
+	HUMIDITY
+};
+enum DHT11_output_options display_cases = BOTH;
+
 
 
 /*       Interrupt Service Routine for UART receive       */
@@ -82,6 +92,13 @@ bool check_password(const char * buff){
 
 
 void clear_text(int lines){
+	
+	for (int i = 0; i < lines; i++) {
+		uart_print("\033[A\r                                                                                              ");
+	}
+}
+
+void go_up(int lines){
 	
 	for (int i = 0; i < lines; i++) {
 		uart_print("\033[A\r");
@@ -184,14 +201,26 @@ void DHT11_read_data(Pin pin) {
 	
 	humidity = Packets[0] + (Packets[1] * 0.1f);
 	temperature = Packets[2] + (Packets[3] * 0.1f);
-	sprintf(display_message, "Humidity: %f, Temperature: %f\r\n", humidity, temperature);
+	
+	switch (display_cases){
+		case BOTH:
+			sprintf(display_message, "Humidity: %f, Temperature: %f, reading with period = %d sec \r\n", humidity, temperature, reading_period);
+			break;
+		case FREQUENCY:
+			sprintf(display_message, "Temperature: %f,                      reading with period = %d sec \r\n", temperature, reading_period);
+			break;
+		case HUMIDITY:
+			sprintf(display_message, "Humidity: %f,                         reading with period = %d sec \r\n", humidity, reading_period);
+			break;
+	}
+	
 	
 	// print in correct place
 	uart_print("\033[A\r                            ");
 	uart_print(display_message);
 	for (int i = 0; i < buff_index + 9; i++) {
 		uart_print("\033[1C");
-	}
+	}				
 }
 
 
@@ -207,14 +236,30 @@ void TIM2_IRQHandler(void) {
 }
 
 
+void update_timer_frequency(uint32_t new_reading_period_seconds) {
+    TIM2->CR1 &= ~TIM_CR1_CEN;  // 1. Stop the timer
+
+    // 2. Update the prescaler and ARR
+    TIM2->PSC = 15999;  // 16 MHz / 16000 = 1 kHz tick
+    TIM2->ARR = 1000 * new_reading_period_seconds - 1;  // 3. Set new period in milliseconds
+
+    TIM2->CNT = 0;  // 4. Reset the counter (optional but recommended)
+    TIM2->CR1 |= TIM_CR1_CEN;  // 5. Restart the timer
+}
+
+
+
 
 
 
 
 
 int main() {
+	
+	
 	bool status_login = true;
-	uint8_t selection = 1;
+	uint8_t selection = 0;
+	
 	
 	// Variables to help with UART read / write
 	uint8_t rx_char = 0;
@@ -227,7 +272,8 @@ int main() {
 	
 	__enable_irq(); // Enable interrupts
 	
-	uart_print("\r\n");// Print newline
+	// clear visible page
+	uart_print("\033[2J\033[H\n");
 	
 	
 	
@@ -251,7 +297,7 @@ int main() {
 			
 			if (rx_char == 0x9 && !status_login && buff_index == 0) {
 				__disable_irq();
-				clear_text(MENU_LINES + 1);
+				go_up(MENU_LINES + 1);
 				selection = (selection + 1) % 4;
 				uart_menu(selection, 1);
 				__enable_irq();
@@ -272,7 +318,7 @@ int main() {
 				if (!status_login){
 					// update menu, hide highlight
 					__disable_irq();
-					clear_text(MENU_LINES + 1);
+					go_up(MENU_LINES + 1);
 					uart_menu(selection, 0);
 					__enable_irq();
 				}
@@ -282,6 +328,32 @@ int main() {
 		
 		// Replace the last character with null terminator to make it a valid C string
 		buff[buff_index - 1] = '\0';
+		
+
+		if (buff_index == 1){
+			// act based on selected option
+			switch(selection){
+				case 0:
+					if (reading_period < 10) reading_period++;
+					DHT11_read_data(PC_8);
+					update_timer_frequency(reading_period);
+					break;		
+				case 1:
+					if (reading_period > 2) reading_period--;
+					DHT11_read_data(PC_8);
+					update_timer_frequency(reading_period);
+					break;
+				case 2:
+					display_cases = (display_cases + 1) % 3;
+					DHT11_read_data(PC_8);
+					break;
+				case 3:
+					DHT11_read_data(PC_8);
+					// uart_print("Mode");
+					break;
+					
+			}
+		}
 		
 		// STATUS ACTION HERE
 		
@@ -297,7 +369,7 @@ int main() {
 		if (!status_login){
 			// update menu, show higlight
 			__disable_irq();
-			clear_text(MENU_LINES + 1);
+			go_up(MENU_LINES + 1);
 			uart_menu(selection, 1);
 			__enable_irq();
 		}
@@ -315,13 +387,13 @@ int main() {
 			//uart_print("Succesful Login\r\n");
 			uart_print("\r                                                  \r");
 			buff_index = 0; // Reset buffer index
-			uart_menu(1, 1);
+			uart_menu(selection, 1);
 			
 			// enable temprerature interupt
 			RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;  // Enable clock for TIM2
 			// set the amount of ticks relative to the clock speed
 			TIM2->PSC = 15999;  // Prescaler: divide 16 MHz by 16000 = 1 kHz
-			TIM2->ARR = 5999;   // Auto-reload: 6000 ticks at 1 kHz = 6s
+			TIM2->ARR = 1000 * reading_period - 1;   // Auto-reload: 1000 * period ticks at 1 kHz = period sec
 			TIM2->DIER |= TIM_DIER_UIE;     // Enable update interrupt (overflow interrupt)
 			NVIC_SetPriority(TIM2_IRQn, 3);  // set the priority 
 			NVIC_EnableIRQ(TIM2_IRQn);
