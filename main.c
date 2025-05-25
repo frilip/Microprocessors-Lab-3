@@ -49,6 +49,15 @@ enum DHT11_output_options {
 };
 enum DHT11_output_options display_cases = BOTH;
 
+/*
+enum mode_options {
+	MODE_A = 0,
+	MODE_B
+};
+enum mode_options mode = MODE_A;
+*/
+
+char mode = 'A';
 
 
 /*       Interrupt Service Routine for UART receive       */
@@ -61,6 +70,7 @@ void uart_rx_isr(uint8_t rx) {
 }
 
 void uart_menu(uint8_t selection, bool highlight) {
+	display_message[0] = '\0';
 	strcat(display_message, menu);
 	for (int i = 0; i < 4; i++) {
 		if (i == selection && highlight) {
@@ -89,26 +99,16 @@ bool check_password(const char * buff){
 }
 
 
-
-
-void clear_text(int lines){
-	
-	for (int i = 0; i < lines; i++) {
-		uart_print("\033[A\r                                                                                              ");
-	}
-}
-
 void go_up(int lines){
-	
 	for (int i = 0; i < lines; i++) {
 		uart_print("\033[A\r");
 	}
-	display_message[0] = '\0';
 }
 
 
 void touch_sensor_isr(int status) {
-	uart_print("Don't touch me!\r\n");
+	if (mode == 'A')  mode = 'B';
+	else mode = 'A';
 }
 
 
@@ -218,6 +218,7 @@ void DHT11_read_data(Pin pin) {
 	// print in correct place
 	uart_print("\033[A\r                            ");
 	uart_print(display_message);
+	// return the cursor where it was, buff_index + 9 to the right (9 is from the "Command: " text)
 	for (int i = 0; i < buff_index + 9; i++) {
 		uart_print("\033[1C");
 	}				
@@ -278,9 +279,9 @@ int main() {
 	
 	
 	// Initialize the Touch sensor
-	// gpio_set_mode(PC_8, PullDown); // Set touch sensor out pin to PullDown (input)
-	// gpio_set_trigger(PC_8, Rising);
-	// gpio_set_callback(PC_8, touch_sensor_isr);
+	gpio_set_mode(PC_6, PullDown); // Set touch sensor out pin to PullDown (input)
+	gpio_set_trigger(PC_6, Rising);
+	gpio_set_callback(PC_6, touch_sensor_isr);
 	
 
 	uart_print("Enter your password: ");
@@ -295,8 +296,8 @@ int main() {
 			while (!queue_dequeue(&rx_queue, &rx_char))
 				__WFI(); // Wait for Interrupt
 			
-			if (rx_char == 0x9 && !status_login && buff_index == 0) {
-				__disable_irq();
+			if (rx_char == 0x9 && !status_login && buff_index == 0) { // if buff_index > 0 then a command is being written
+				__disable_irq();   // disable interrupts so that writting tempterature is not called mid writting menu
 				go_up(MENU_LINES + 1);
 				selection = (selection + 1) % 4;
 				uart_menu(selection, 1);
@@ -315,7 +316,7 @@ int main() {
 				buff[buff_index++] = (char)rx_char; // Store digit or dash in buffer
 				uart_tx(rx_char); // Echo digit or dash back to terminal
 				
-				if (!status_login){
+				if (!status_login && rx_char != '\r'){ // a character has been typed and we are not on login phase, so it's a command 
 					// update menu, hide highlight
 					__disable_irq();
 					go_up(MENU_LINES + 1);
@@ -326,11 +327,56 @@ int main() {
 			}
 		} while (rx_char != '\r' && buff_index < BUFF_SIZE); // Continue until Enter key or buffer full
 		
+		// ENTER PRESSED...
+		
 		// Replace the last character with null terminator to make it a valid C string
 		buff[buff_index - 1] = '\0';
 		
+		// Check if buffer overflow occurred
+		if (buff_index >= BUFF_SIZE) {
+			// fix this 
+			uart_print("Stop trying to overflow my buffer! I resent that!\r\n");
+		}
+		
+		
+		
+		// Check password
+		if (status_login && check_password(buff)){
+			status_login = false;
+			//uart_print("Succesful Login\r\n");
+			uart_print("\r                                                  \r");
+			buff_index = 0; // Reset buffer index
+			uart_menu(selection, 1);
+			
+			// enable temprerature interupt
+			RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;  // Enable clock for TIM2
+			// set the amount of ticks relative to the clock speed
+			TIM2->PSC = 15999;  // Prescaler: divide 16 MHz by 16000 = 1 kHz
+			TIM2->ARR = 1000 * reading_period - 1;   // Auto-reload: 1000 * period ticks at 1 kHz = period sec
+			TIM2->DIER |= TIM_DIER_UIE;     // Enable update interrupt (overflow interrupt)
+			NVIC_SetPriority(TIM2_IRQn, 3);  // set the priority 
+			NVIC_EnableIRQ(TIM2_IRQn);
+			TIM2->CR1 |= TIM_CR1_CEN;	   // Start TIM2
+			continue;
+			
+		} else if (status_login) {
+			// login phase, wrong password
+			// delete written 
+			uart_print("\r                                                \r");
+			/*
+			for (int i=0; i<buff_index; i++)
+				uart_print("\b \b");
+			*/   // its not working I dont know why
+			
+			uart_print("Enter your password: ");
+			continue;
+		}
+		
+		
+		// Not login phase...
 
 		if (buff_index == 1){
+			// no command was written
 			// act based on selected option
 			switch(selection){
 				case 0:
@@ -354,56 +400,25 @@ int main() {
 					
 			}
 		}
-		
-		// STATUS ACTION HERE
-		
-		// unwrite command
-		for (int i=0; i<buff_index; i++){
-			uart_tx(0x7F);
-		}
-		buff_index = 0;
-
-		// uart_print(buff);
-		
-		
-		if (!status_login){
+		else {
+			// command was written 
+			
 			// update menu, show higlight
 			__disable_irq();
 			go_up(MENU_LINES + 1);
 			uart_menu(selection, 1);
 			__enable_irq();
-		}
-		
-		// Check if buffer overflow occurred
-		if (buff_index >= BUFF_SIZE) {
-			uart_print("Stop trying to overflow my buffer! I resent that!\r\n");
-		}
-		
-		
-		
-		// Check password
-		if (status_login && check_password(buff)){
-			status_login = false;
-			//uart_print("Succesful Login\r\n");
-			uart_print("\r                                                  \r");
-			buff_index = 0; // Reset buffer index
-			uart_menu(selection, 1);
 			
-			// enable temprerature interupt
-			RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;  // Enable clock for TIM2
-			// set the amount of ticks relative to the clock speed
-			TIM2->PSC = 15999;  // Prescaler: divide 16 MHz by 16000 = 1 kHz
-			TIM2->ARR = 1000 * reading_period - 1;   // Auto-reload: 1000 * period ticks at 1 kHz = period sec
-			TIM2->DIER |= TIM_DIER_UIE;     // Enable update interrupt (overflow interrupt)
-			NVIC_SetPriority(TIM2_IRQn, 3);  // set the priority 
-			NVIC_EnableIRQ(TIM2_IRQn);
-			TIM2->CR1 |= TIM_CR1_CEN;	   // Start TIM2
+			// unwrite command
+			for (int i=0; i<buff_index; i++){
+				uart_tx(0x7F);
+			}
 			
-		} else if (status_login) {
-			uart_print("\r                                                  \r");
-			uart_print("Enter your password: ");
+			if (!strcmp(buff, "status")){
+				// STATUS ACTION HERE
+				sprintf(display_message, "\033[A\r                MODE: %c\r\n\033[9C", mode);
+				uart_print(display_message);
+			}
 		}
-		
 	}
-	
 }
