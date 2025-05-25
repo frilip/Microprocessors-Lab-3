@@ -21,6 +21,10 @@
 #define MENU_LINES 7
 #define MAX_STATE_TIME 700
 
+#define DHT11 PC_8
+#define TOUCH PC_6
+#define LED PC_5
+
 struct menu_text {
 	const char *text;
 };
@@ -33,7 +37,7 @@ const char* password = "password";
 const char* menu = "                ==== Environmental System ====\r\nOptions:\r\n";
 const char* highlight_front = "\033[43;30m";
 const char* highlight_back = "\033[0m";
-char display_message [1000];
+char display_message [1500];
 
 
 Queue rx_queue;       // Queue for storing received characters
@@ -48,6 +52,8 @@ enum DHT11_output_options {
 	HUMIDITY
 };
 enum DHT11_output_options display_cases = BOTH;
+float temperature;
+int humidity;
 
 /*
 enum mode_options {
@@ -58,6 +64,7 @@ enum mode_options mode = MODE_A;
 */
 
 char mode = 'A';
+uint8_t dangerous_values_count = 0;
 
 
 /*       Interrupt Service Routine for UART receive       */
@@ -134,55 +141,53 @@ void DHT11_read_data(Pin pin) {
 	uint8_t Packets[DHT11_MAX_BYTE_PACKETS] = {0};
 	uint8_t PacketIndex = 0;
 	uint8_t state_time;
-	float humidity;
-	float temperature;
 	char display_message[100];
 	
-	gpio_set_mode(PC_8, Output);
+	gpio_set_mode(DHT11, Output);
 	// PULLING the Line to Low and waits for 20ms
-	gpio_set(PC_8, 0);
+	gpio_set(DHT11, 0);
 	delay_ms(20);
 	// PULLING the Line to HIGH and waits for 40us
-	gpio_set(PC_8, 1);
+	gpio_set(DHT11, 1);
 	delay_us(40);
 
 	// __disable_irq();
-	gpio_set_mode(PC_8, Input);
+	gpio_set_mode(DHT11, Input);
 
 	// If the Line is still HIGH, that means DHT11 is not responding
-	if(gpio_get(PC_8)) {
+	if(gpio_get(DHT11)) {
 		uart_print("ERROR!\r\n");
 	}
 	
 	// Wait for HIGH
-	if(!observer(PC_8, 1)) {
+	if(!observer(DHT11, 1)) {
 		uart_print("TIMEOUT OUTSIDE 1!\r\n");
 	}
 
 	// Now DHT11 have pulled the Line to HIGH, we will wait till it PULLS is to LOW
 	// which means the handshake is done
-	if(!observer(PC_8, 0)) {
+	if(!observer(DHT11, 0)) {
 		uart_print("TIMEOUT OUTSIDE 2!\r\n");
 	}
 	
 	// WE ARE LOW HERE
 	while(Bits < 40) {
 		/*
-		if (!gpio_get(PC_8)) {
+		if (!gpio_get(DHT11)) {
 			uart_print("LOW\r\n");
 		}
 		*/
 		// DHT11 is now starting to transmit One Bit
 		// We will wait till it PULL the Line to HIGH
 		// uart_tx('-');
-		if(!observer(PC_8, 1)) {
+		if(!observer(DHT11, 1)) {
 			uart_print("TIMEOUT 1!\r\n");
 		}
 
 		// Now we will just count the us it stays HIGH
 		// 28us means 0
 		// 70us means 1
-		state_time = 2 * observer(PC_8, 0);
+		state_time = 2 * observer(DHT11, 0);
 		if(!(state_time)) {
 			uart_print("TIMEOUT 2!\r\n");
 		}
@@ -198,19 +203,33 @@ void DHT11_read_data(Pin pin) {
 		uart_print("MISMATCH!\r\n");
 	}
 	
-	
 	humidity = Packets[0] + (Packets[1] * 0.1f);
 	temperature = Packets[2] + (Packets[3] * 0.1f);
+}
+
+
+void handle_DHT11_data(){	
+	if (mode == 'B' && ( (temperature > 25 || humidity > 60) || dangerous_values_count < 5) ){
+		dangerous_values_count++;
+		// enable LED interrupt
+		gpio_set(LED,1);
+	}
+	else{
+		// disable LED interrupt
+		gpio_set(LED,0);
+		dangerous_values_count = 0;
+	}
+		
 	
 	switch (display_cases){
 		case BOTH:
-			sprintf(display_message, "Humidity: %f, Temperature: %f, reading with period = %d sec \r\n", humidity, temperature, reading_period);
+			sprintf(display_message, "Humidity: %d, Temperature: %f, reading with period = %d sec \r\n", humidity, temperature, reading_period);
 			break;
 		case FREQUENCY:
-			sprintf(display_message, "Temperature: %f,                      reading with period = %d sec \r\n", temperature, reading_period);
+			sprintf(display_message, "Temperature: %f,               reading with period = %d sec \r\n", temperature, reading_period);
 			break;
 		case HUMIDITY:
-			sprintf(display_message, "Humidity: %f,                         reading with period = %d sec \r\n", humidity, reading_period);
+			sprintf(display_message, "Humidity: %d,                         reading with period = %d sec \r\n", humidity, reading_period);
 			break;
 	}
 	
@@ -229,7 +248,8 @@ void DHT11_read_data(Pin pin) {
 
 /*      Interrupt Sevice Routine for reading DHT11      */
 void TIM2_IRQHandler(void) {
-	DHT11_read_data(PC_8);
+	DHT11_read_data(DHT11);
+	handle_DHT11_data();
 	
 	if (TIM2->SR & TIM_SR_UIF) {	// Check if update interrupt flag is set
 		TIM2->SR &= ~TIM_SR_UIF;		// Clear the flag immediately
@@ -279,9 +299,13 @@ int main() {
 	
 	
 	// Initialize the Touch sensor
-	gpio_set_mode(PC_6, PullDown); // Set touch sensor out pin to PullDown (input)
-	gpio_set_trigger(PC_6, Rising);
-	gpio_set_callback(PC_6, touch_sensor_isr);
+	gpio_set_mode(TOUCH, PullDown); // Set touch sensor out pin to PullDown (input)
+	gpio_set_trigger(TOUCH, Rising);
+	gpio_set_callback(TOUCH, touch_sensor_isr);
+	
+	// initialize the lED
+	gpio_set_mode(LED, Output);
+	
 	
 
 	uart_print("Enter your password: ");
@@ -378,23 +402,28 @@ int main() {
 		if (buff_index == 1){
 			// no command was written
 			// act based on selected option
+			buff_index = 0;
 			switch(selection){
 				case 0:
 					if (reading_period < 10) reading_period++;
-					DHT11_read_data(PC_8);
+					DHT11_read_data(DHT11);
+					handle_DHT11_data();
 					update_timer_frequency(reading_period);
 					break;		
 				case 1:
 					if (reading_period > 2) reading_period--;
-					DHT11_read_data(PC_8);
+					DHT11_read_data(DHT11);
+					handle_DHT11_data();
 					update_timer_frequency(reading_period);
 					break;
 				case 2:
 					display_cases = (display_cases + 1) % 3;
-					DHT11_read_data(PC_8);
+					DHT11_read_data(DHT11);
+					handle_DHT11_data();
 					break;
 				case 3:
-					DHT11_read_data(PC_8);
+					DHT11_read_data(DHT11);
+					handle_DHT11_data();
 					// uart_print("Mode");
 					break;
 					
