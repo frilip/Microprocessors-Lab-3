@@ -43,6 +43,7 @@ bool danger = false;
 bool print_mode = true;
 bool print_menu = false;
 bool update_values = false;
+bool update_touch_sensor = false;
 unsigned int dangerous_values = 0;
 unsigned int touch_sensor_clicks = 0;
 uint8_t reading_period = 6;
@@ -133,7 +134,7 @@ void DHT11_data_handler() {
 	// return the cursor where it was, buff_index + 9 to the right (9 is from the "Command: " text)
 	for (int i = 0; i < buff_index + 9; i++) {
 		uart_print("\033[1C");
-	}				
+	}
 }
 
 void update_timer_frequency(uint32_t new_reading_period_seconds) {
@@ -359,7 +360,7 @@ void led_blinking_isr() {
 void touch_sensor_isr(int status) {
 	
 	touch_sensor_clicks++;
-	
+	update_touch_sensor = true;
 	if (mode == 'A') {
 		mode = 'B';
 		timer_init(500000);
@@ -428,7 +429,7 @@ int main() {
 		do {
 			// Wait until a digit or dash is received in the queue
 			rx_char = 0;
-			while (!queue_dequeue(&rx_queue, &rx_char) && print_mode && !update_values)
+			while (!queue_dequeue(&rx_queue, &rx_char) && print_mode && !update_values && !update_touch_sensor)
 				__WFI(); // Wait for Interrupt
 			
 			if (update_values) {
@@ -437,10 +438,11 @@ int main() {
 				update_values = false;
 			}
 			
-			if (MODE == MAIN && (touch_sensor_clicks % 3 == 0) && touch_sensor_clicks > 0) {
+			if (update_touch_sensor && (touch_sensor_clicks % 3 == 0) && touch_sensor_clicks > 0) {
 				reading_period = aem_sum;
 				update_timer_frequency(reading_period);
 				DHT11_data_handler();
+				update_touch_sensor = false;
 			}
 			
 			if (rx_char == 0x9 && MODE == MAIN && buff_index == 0) { // if buff_index > 0 then a command is being written

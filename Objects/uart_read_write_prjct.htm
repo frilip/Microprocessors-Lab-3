@@ -3,7 +3,7 @@
 <title>Static Call Graph - [.\Objects\uart_read_write_prjct.axf]</title></head>
 <body><HR>
 <H1>Static Call Graph for image .\Objects\uart_read_write_prjct.axf</H1><HR>
-<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 6230001: Last Updated: Wed May 28 05:44:23 2025
+<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 6230001: Last Updated: Wed May 28 16:49:12 2025
 <BR><P>
 <H3>Maximum Stack Usage =        324 bytes + Unknown(Functions without stacksize, Cycles, Untraceable Function Pointers)</H3><H3>
 Call chain for Maximum Stack Depth:</H3>
@@ -1361,7 +1361,7 @@ Global Symbols
 </UL>
 <BR>[Address Reference Count : 1]<UL><LI> main.o(.text.main)
 </UL>
-<P><STRONG><a name="[80]"></a>main</STRONG> (Thumb, 1192 bytes, Stack size 56 bytes, main.o(.text.main))
+<P><STRONG><a name="[80]"></a>main</STRONG> (Thumb, 1226 bytes, Stack size 56 bytes, main.o(.text.main))
 <BR><BR>[Stack]<UL><LI>Max Depth = 240 + Unknown Stack Size
 <LI>Call Chain = main &rArr; status_handler &rArr; DHT11_data_handler &rArr; sprintf &rArr; _printf_char_common &rArr; __printf
 </UL>
@@ -1489,7 +1489,7 @@ Global Symbols
 <BR>[Called By]<UL><LI><a href="#[80]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;main
 </UL>
 
-<P><STRONG><a name="[4a]"></a>touch_sensor_isr</STRONG> (Thumb, 100 bytes, Stack size 16 bytes, main.o(.text.touch_sensor_isr))
+<P><STRONG><a name="[4a]"></a>touch_sensor_isr</STRONG> (Thumb, 112 bytes, Stack size 16 bytes, main.o(.text.touch_sensor_isr))
 <BR><BR>[Stack]<UL><LI>Max Depth = 64<LI>Call Chain = touch_sensor_isr &rArr; timer_init &rArr; NVIC_EncodePriority
 </UL>
 <BR>[Calls]<UL><LI><a href="#[e5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;timer_disable
