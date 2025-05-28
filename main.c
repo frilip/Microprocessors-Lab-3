@@ -129,12 +129,14 @@ void DHT11_data_handler() {
 	
 	
 	// print in correct place
+	uart_print("\033[?25l"); // Hide the cursor
 	uart_print("\033[A\033[A\r                            ");
 	uart_print(display_message);
 	// return the cursor where it was, buff_index + 9 to the right (9 is from the "Command: " text)
 	for (int i = 0; i < buff_index + 9; i++) {
 		uart_print("\033[1C");
 	}
+	uart_print("\033[?25l"); // Reveal the cursor
 }
 
 void update_timer_frequency(uint32_t new_reading_period_seconds) {
@@ -435,6 +437,7 @@ int main() {
 			if (update_values) {
 				DHT11_read_data(DHT11);
 				DHT11_data_handler();
+				uart_print("\033[?25h");
 				update_values = false;
 			}
 			
@@ -446,16 +449,17 @@ int main() {
 			}
 			
 			if (rx_char == 0x9 && MODE == MAIN && buff_index == 0) { // if buff_index > 0 then a command is being written
-				__disable_irq();   // disable interrupts so that writting tempterature is not called mid writting menu
 				selection = (selection + 1) % 4;
+				uart_print("\033[?25l");
 				uart_menu_handler(selection, 1);
-				__enable_irq();
+				uart_print("\033[?25h");
 				continue;
 			}
 		
 			if (MODE == MAIN && rx_char == '\r' && buff_index == 0) {
 				// no command was written
 				// act based on selected option
+				rx_char = 0; // We zero it out so it doesn't escape the while...
 				switch(selection) {
 					case 0:
 						if (reading_period < 10) reading_period++;
@@ -478,6 +482,7 @@ int main() {
 						__enable_irq();
 						break;
 				}
+				buff_index = 0;
 			} else if (rx_char == 0x7F && buff_index > 0) { // Handle backspace character
 					buff_index--; // Move buffer index back
 					uart_tx(rx_char); // Send backspace character to erase on terminal
