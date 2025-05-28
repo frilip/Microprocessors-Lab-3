@@ -136,7 +136,7 @@ void DHT11_data_handler() {
 	for (int i = 0; i < buff_index + 9; i++) {
 		uart_print("\033[1C");
 	}
-	uart_print("\033[?25l"); // Reveal the cursor
+	uart_print("\033[?25h"); // Reveal the cursor
 }
 
 void update_timer_frequency(uint32_t new_reading_period_seconds) {
@@ -437,7 +437,6 @@ int main() {
 			if (update_values) {
 				DHT11_read_data(DHT11);
 				DHT11_data_handler();
-				uart_print("\033[?25h");
 				update_values = false;
 			}
 			
