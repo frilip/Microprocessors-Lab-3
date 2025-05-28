@@ -37,10 +37,12 @@ const char *password = "password";
 const char *menu = "                ==== Environmental System ====\r\nOptions:\r\n";
 const char *highlight_front = "\033[43;30m";
 const char *highlight_back = "\033[0m";
-char display_message [1500];
+char display_message[1500];
 int aem_sum;
 bool danger = false;
-bool print_mode = false;
+bool print_mode = true;
+bool print_menu = false;
+bool update_values = false;
 unsigned int dangerous_values = 0;
 unsigned int touch_sensor_clicks = 0;
 
@@ -148,7 +150,6 @@ void DHT11_read_data(Pin pin) {
 	uint8_t Packets[DHT11_MAX_BYTE_PACKETS] = {0};
 	uint8_t PacketIndex = 0;
 	uint8_t state_time;
-	char display_message[100];
 	
 	__disable_irq();
 	
@@ -232,8 +233,7 @@ void DHT11_read_data(Pin pin) {
 	}
 }
 
-
-void handle_DHT11_data(){		
+void handle_DHT11_data() {		
 	
 	switch (display_cases){
 		case BOTH:
@@ -264,8 +264,7 @@ void TIM2_IRQHandler(void) {
 		TIM2->SR &= ~TIM_SR_UIF;		// Clear the flag immediately
 	}
 	
-	DHT11_read_data(DHT11);
-	handle_DHT11_data();
+	update_values = true;
 }
 
 /*      Interrupt Sevice Routine for leaving the status display message      */
@@ -302,6 +301,32 @@ void touch_sensor_isr(int status) {
 	}
 }
 
+void status_handler() {
+	
+	// update menu, show higlight
+	__disable_irq();
+	go_up(MENU_LINES + 2);
+	uart_menu(selection, 1);
+	__enable_irq();
+	
+	// unwrite command
+	for (int i = 0; i < buff_index; i++){
+		uart_tx(0x7F);
+	}
+	// buff_index = 0;
+	
+	if (!strcmp(buff, "status")){
+		// STATUS ACTION HERE
+		NVIC_EnableIRQ(TIM3_IRQn);
+		TIM3->CR1 |= TIM_CR1_CEN;
+		DHT11_read_data(DHT11);
+		handle_DHT11_data();
+		sprintf(display_message, "\033[A\r                            MODE: %c, Number of MODE changes: %d\r\n\033[9C", mode, touch_sensor_clicks);
+		uart_print(display_message);
+		print_mode = true;
+	}
+}
+
 void password_handler() {
 	if (!strcmp(buff, password)){
 		MODE = AEM;
@@ -311,10 +336,6 @@ void password_handler() {
 		// login phase, wrong password
 		// delete written 
 		uart_print("\r                                                \r");
-		/*
-		for (int i=0; i<buff_index; i++)
-			uart_print("\b \b");
-		*/   // its not working I dont know why
 		
 		uart_print("Incorrect password! Try again: ");
 	}
@@ -397,8 +418,15 @@ int main() {
 		
 		do {
 			// Wait until a digit or dash is received in the queue
-			while (!queue_dequeue(&rx_queue, &rx_char))
+			rx_char = 0;
+			while (!queue_dequeue(&rx_queue, &rx_char) && print_mode && !update_values)
 				__WFI(); // Wait for Interrupt
+			
+			if (update_values) {
+				DHT11_read_data(DHT11);
+				handle_DHT11_data();
+				update_values = false;
+			}
 			
 			if (rx_char == 0x9 && MODE == MAIN && buff_index == 0) { // if buff_index > 0 then a command is being written
 				__disable_irq();   // disable interrupts so that writting tempterature is not called mid writting menu
@@ -409,11 +437,34 @@ int main() {
 				continue;
 			}
 		
-			if (rx_char == 0x7F) { // Handle backspace character
-				if (buff_index > 0) {
+			if (MODE == MAIN && rx_char == '\r' && buff_index == 0) {
+				// no command was written
+				// act based on selected option
+				switch(selection) {
+					case 0:
+						if (reading_period < 10) reading_period++;
+						update_timer_frequency(reading_period);
+						handle_DHT11_data();
+						break;		
+					case 1:
+						if (reading_period > 2) reading_period--;
+						update_timer_frequency(reading_period);
+						handle_DHT11_data();
+						break;
+					case 2:
+						display_cases = (display_cases + 1) % 3;
+						handle_DHT11_data();
+						break;
+					case 3:
+						__disable_irq();
+						DHT11_read_data(DHT11);
+						handle_DHT11_data();
+						__enable_irq();
+						break;
+				}
+			} else if (rx_char == 0x7F && buff_index > 0) { // Handle backspace character
 					buff_index--; // Move buffer index back
 					uart_tx(rx_char); // Send backspace character to erase on terminal
-				}
 			} else if (rx_char >= 0x20 && rx_char <= 0x7E || rx_char == '\r') {
 				// Store and echo the received character back
 				buff[buff_index++] = (char)rx_char; // Store digit or dash in buffer
@@ -427,6 +478,14 @@ int main() {
 					__enable_irq();
 				}
 			}
+			
+			if (MODE == MAIN && !print_mode) {
+				sprintf(display_message, "\033[A\r                                                                 \r\n\033[9C");
+				uart_print(display_message);
+				NVIC_DisableIRQ(TIM3_IRQn);
+				print_mode = true;
+			}
+			
 		} while (rx_char != '\r' && buff_index < BUFF_SIZE); // Continue until Enter key or buffer full
 		
 		// Replace the last character with null terminator to make it a valid C string
@@ -434,73 +493,14 @@ int main() {
 		
 		switch (MODE) {
 			case MAIN:
+				status_handler();
 				break;
 			case PASSWORD:
 				password_handler();
-				continue;
+				break;
 			case AEM:
 				aem_handler();
-				continue;
-		}
-
-		if (buff_index == 1) {
-			// no command was written
-			// act based on selected option
-			buff_index = 0;
-			switch(selection){
-				case 0:
-					if (reading_period < 10) reading_period++;
-					update_timer_frequency(reading_period);
-					handle_DHT11_data();
-					break;		
-				case 1:
-					if (reading_period > 2) reading_period--;
-					update_timer_frequency(reading_period);
-					handle_DHT11_data();
-					break;
-				case 2:
-					display_cases = (display_cases + 1) % 3;
-					handle_DHT11_data();
-					break;
-				case 3:
-					__disable_irq();
-					DHT11_read_data(DHT11);
-					handle_DHT11_data();
-					__enable_irq();
-					break;
-			}
-		}
-		else {
-			// command was written 
-			
-			// update menu, show higlight
-			__disable_irq();
-			go_up(MENU_LINES + 2);
-			uart_menu(selection, 1);
-			__enable_irq();
-			
-			// unwrite command
-			for (int i = 0; i < buff_index; i++){
-				uart_tx(0x7F);
-			}
-			buff_index = 0;
-			
-			if (!strcmp(buff, "status")){
-				// STATUS ACTION HERE
-				NVIC_EnableIRQ(TIM3_IRQn);
-				TIM3->CR1 |= TIM_CR1_CEN;	   // Start TIM3 ---> VARAEI ME TO POU KSEKINISEI...
-				DHT11_read_data(DHT11);
-				handle_DHT11_data();
-				print_mode = true;
-				sprintf(display_message, "\033[A\r                            MODE: %c, Number of MODE changes: %d\r\n\033[9C", mode, touch_sensor_clicks);
-				uart_print(display_message);
-			}
-		}
-		
-		if (!print_mode) {
-			sprintf(display_message, "\033[A\r                                                                 \r\n\033[9C");
-			uart_print(display_message);
-			NVIC_DisableIRQ(TIM3_IRQn);
+				break;
 		}
 	}
 }
