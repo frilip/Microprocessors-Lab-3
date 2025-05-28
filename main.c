@@ -18,7 +18,7 @@
 
 /*         UART variable definitions         */
 #define BUFF_SIZE 128 // read buffer length
-#define MENU_LINES 7
+#define MENU_LINES 9
 #define MAX_STATE_TIME 700
 
 #define DHT11 PC_8
@@ -45,13 +45,12 @@ bool print_menu = false;
 bool update_values = false;
 unsigned int dangerous_values = 0;
 unsigned int touch_sensor_clicks = 0;
+uint8_t reading_period = 6;
+uint8_t selection = 0;
 
 Queue rx_queue;       // Queue for storing received characters
 char buff[BUFF_SIZE]; // The UART read string will be stored here
 uint32_t buff_index;
-
-uint8_t reading_period = 6;
-uint8_t selection = 0;
 														
 enum DHT11_output_options {
 	BOTH = 0,
@@ -81,17 +80,16 @@ enum mode_options mode = MODE_A;
 char mode = 'A';
 uint8_t safe_values_count = 0;
 
+/* ----------------------------------------------------------------- */
+/* -----------------   HANDLER FUNCTIONS - START   ----------------- */
+/* ----------------------------------------------------------------- */
 
-/*       Interrupt Service Routine for UART receive       */
-void uart_rx_isr(uint8_t rx) {
-	// Check if the received character is a printable ASCII character
-	if (rx >= 0x0 && rx <= 0x7F ) {
-		// Store the received character
-		queue_enqueue(&rx_queue, rx);
+void uart_menu_handler(uint8_t selection, bool highlight) {
+	
+	// Move up enough lines to clear the previous menu instance
+	for (int i = 0; i < MENU_LINES; i++) {
+		uart_print("\033[A\r");
 	}
-}
-
-void uart_menu(uint8_t selection, bool highlight) {
 	
 	display_message[0] = '\0';
 	strcat(display_message, menu);
@@ -114,10 +112,28 @@ void uart_menu(uint8_t selection, bool highlight) {
 	}
 }
 
-void go_up(int lines){
-	for (int i = 0; i < lines; i++) {
-		uart_print("\033[A\r");
+void DHT11_data_handler() {		
+	
+	switch (display_cases){
+		case BOTH:
+			sprintf(display_message, "Humidity: %d, Temperature: %f, reading with period = %d sec \r\n\n", humidity, temperature, reading_period);
+			break;
+		case FREQUENCY:
+			sprintf(display_message, "Temperature: %f,               reading with period = %d sec \r\n\n", temperature, reading_period);
+			break;
+		case HUMIDITY:
+			sprintf(display_message, "Humidity: %d,                         reading with period = %d sec \r\n\n", humidity, reading_period);
+			break;
 	}
+	
+	
+	// print in correct place
+	uart_print("\033[A\033[A\r                            ");
+	uart_print(display_message);
+	// return the cursor where it was, buff_index + 9 to the right (9 is from the "Command: " text)
+	for (int i = 0; i < buff_index + 9; i++) {
+		uart_print("\033[1C");
+	}				
 }
 
 void update_timer_frequency(uint32_t new_reading_period_seconds) {
@@ -233,94 +249,24 @@ void DHT11_read_data(Pin pin) {
 	}
 }
 
-void handle_DHT11_data() {		
-	
-	switch (display_cases){
-		case BOTH:
-			sprintf(display_message, "Humidity: %d, Temperature: %f, reading with period = %d sec \r\n\n", humidity, temperature, reading_period);
-			break;
-		case FREQUENCY:
-			sprintf(display_message, "Temperature: %f,               reading with period = %d sec \r\n\n", temperature, reading_period);
-			break;
-		case HUMIDITY:
-			sprintf(display_message, "Humidity: %d,                         reading with period = %d sec \r\n\n", humidity, reading_period);
-			break;
-	}
-	
-	
-	// print in correct place
-	uart_print("\033[A\033[A\r                            ");
-	uart_print(display_message);
-	// return the cursor where it was, buff_index + 9 to the right (9 is from the "Command: " text)
-	for (int i = 0; i < buff_index + 9; i++) {
-		uart_print("\033[1C");
-	}				
-}
-
-/*      Interrupt Sevice Routine for reading DHT11      */
-void TIM2_IRQHandler(void) {
-
-	if (TIM2->SR & TIM_SR_UIF) {	// Check if update interrupt flag is set
-		TIM2->SR &= ~TIM_SR_UIF;		// Clear the flag immediately
-	}
-	
-	update_values = true;
-}
-
-/*      Interrupt Sevice Routine for leaving the status display message      */
-void TIM3_IRQHandler(void) {
-	
-	if (TIM3->SR & TIM_SR_UIF) {	// Check if update interrupt flag is set
-		TIM3->SR &= ~TIM_SR_UIF;		// Clear the flag immediately
-	}
-	
-	print_mode = false;
-}
-
-void led_blinking_isr() {
-	if (danger) gpio_toggle(LED);
-}
-
-void touch_sensor_isr(int status) {
-	
-	touch_sensor_clicks++;
-	if (touch_sensor_clicks % 3 == 0) {
-		reading_period = aem_sum;
-		update_timer_frequency(reading_period);
-		handle_DHT11_data();
-	}
-	
-	if (mode == 'A') {
-		mode = 'B';
-		timer_init(500000);
-		timer_enable();
-	} else {
-		mode = 'A';
-		timer_disable();
-		gpio_set(LED, LED_OFF);
-	}
-}
-
 void status_handler() {
 	
 	// update menu, show higlight
 	__disable_irq();
-	go_up(MENU_LINES + 2);
-	uart_menu(selection, 1);
+	uart_menu_handler(selection, 1);
 	__enable_irq();
 	
 	// unwrite command
 	for (int i = 0; i < buff_index; i++){
 		uart_tx(0x7F);
 	}
-	// buff_index = 0;
 	
 	if (!strcmp(buff, "status")){
 		// STATUS ACTION HERE
 		NVIC_EnableIRQ(TIM3_IRQn);
 		TIM3->CR1 |= TIM_CR1_CEN;
 		DHT11_read_data(DHT11);
-		handle_DHT11_data();
+		DHT11_data_handler();
 		sprintf(display_message, "\033[A\r                            MODE: %c, Number of MODE changes: %d\r\n\033[9C", mode, touch_sensor_clicks);
 		uart_print(display_message);
 		print_mode = true;
@@ -361,10 +307,73 @@ void aem_handler(){
 	else if (aem_sum > 10) aem_sum = 10;
 	MODE = MAIN;
 	uart_print("\r                                                  \r"); // ???
-	uart_menu(selection, 1);
+	uart_menu_handler(selection, 1);
 	NVIC_EnableIRQ(TIM2_IRQn);
 	TIM2->CR1 |= TIM_CR1_CEN;	   // Start TIM2
 }
+
+/* --------------------------------------------------------------- */
+/* -----------------   HANDLER FUNCTIONS - END   ----------------- */
+/* --------------------------------------------------------------- */
+
+
+
+
+/* ------------------------------------------------------------- */
+/* -----------------   ISR FUNCTIONS - START   ----------------- */
+/* ------------------------------------------------------------- */
+
+/*       Interrupt Service Routine for UART receive       */
+void uart_rx_isr(uint8_t rx) {
+	// Check if the received character is a printable ASCII character
+	if (rx >= 0x0 && rx <= 0x7F ) {
+		// Store the received character
+		queue_enqueue(&rx_queue, rx);
+	}
+}
+
+/*      Interrupt Sevice Routine for reading DHT11      */
+void TIM2_IRQHandler(void) {
+
+	if (TIM2->SR & TIM_SR_UIF) {	// Check if update interrupt flag is set
+		TIM2->SR &= ~TIM_SR_UIF;		// Clear the flag immediately
+	}
+	
+	update_values = true;
+}
+
+/*      Interrupt Sevice Routine for erasing the status display message      */
+void TIM3_IRQHandler(void) {
+	
+	if (TIM3->SR & TIM_SR_UIF) {	// Check if update interrupt flag is set
+		TIM3->SR &= ~TIM_SR_UIF;		// Clear the flag immediately
+	}
+	
+	print_mode = false;
+}
+
+void led_blinking_isr() {
+	if (danger) gpio_toggle(LED);
+}
+
+void touch_sensor_isr(int status) {
+	
+	touch_sensor_clicks++;
+	
+	if (mode == 'A') {
+		mode = 'B';
+		timer_init(500000);
+		timer_enable();
+	} else {
+		mode = 'A';
+		timer_disable();
+		gpio_set(LED, LED_OFF);
+	}
+}
+
+/* ----------------------------------------------------------- */
+/* -----------------   ISR FUNCTIONS - END   ----------------- */
+/* ----------------------------------------------------------- */
 
 
 int main() {
@@ -424,15 +433,20 @@ int main() {
 			
 			if (update_values) {
 				DHT11_read_data(DHT11);
-				handle_DHT11_data();
+				DHT11_data_handler();
 				update_values = false;
+			}
+			
+			if (MODE == MAIN && (touch_sensor_clicks % 3 == 0) && touch_sensor_clicks > 0) {
+				reading_period = aem_sum;
+				update_timer_frequency(reading_period);
+				DHT11_data_handler();
 			}
 			
 			if (rx_char == 0x9 && MODE == MAIN && buff_index == 0) { // if buff_index > 0 then a command is being written
 				__disable_irq();   // disable interrupts so that writting tempterature is not called mid writting menu
-				go_up(MENU_LINES + 2);
 				selection = (selection + 1) % 4;
-				uart_menu(selection, 1);
+				uart_menu_handler(selection, 1);
 				__enable_irq();
 				continue;
 			}
@@ -444,21 +458,21 @@ int main() {
 					case 0:
 						if (reading_period < 10) reading_period++;
 						update_timer_frequency(reading_period);
-						handle_DHT11_data();
+						DHT11_data_handler();
 						break;		
 					case 1:
 						if (reading_period > 2) reading_period--;
 						update_timer_frequency(reading_period);
-						handle_DHT11_data();
+						DHT11_data_handler();
 						break;
 					case 2:
 						display_cases = (display_cases + 1) % 3;
-						handle_DHT11_data();
+						DHT11_data_handler();
 						break;
 					case 3:
 						__disable_irq();
 						DHT11_read_data(DHT11);
-						handle_DHT11_data();
+						DHT11_data_handler();
 						__enable_irq();
 						break;
 				}
@@ -473,8 +487,7 @@ int main() {
 				if (MODE == MAIN && rx_char != '\r'){ // a character has been typed and we are not on login phase, so it's a command 
 					// update menu, hide highlight
 					__disable_irq();
-					go_up(MENU_LINES + 2);
-					uart_menu(selection, 0);
+					uart_menu_handler(selection, 0);
 					__enable_irq();
 				}
 			}
