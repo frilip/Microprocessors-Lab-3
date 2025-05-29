@@ -252,17 +252,19 @@ void DHT11_read_data(Pin pin) {
 	}
 }
 
+void clear_line(){
+	sprintf(display_message, "\r%*s\r", 180, "");
+	uart_print(display_message);
+}
+
 void status_handler() {
 	
 	// update menu, show higlight
-	__disable_irq();
 	uart_menu_handler(selection, 1);
-	__enable_irq();
 	
 	// unwrite command
-	for (int i = 0; i < buff_index; i++){
-		uart_tx(0x7F);
-	}
+	clear_line();
+	uart_print("Command: ");
 	
 	if (!strcmp(buff, "status")){
 		// STATUS ACTION HERE
@@ -279,28 +281,27 @@ void status_handler() {
 void password_handler() {
 	if (!strcmp(buff, password)){
 		MODE = AEM;
-		uart_print("\r                                                  \r"); // ???
-		uart_print("Enter your AEM: ");
+		clear_line();
+		uart_print("Enter you AEM: ");
 	} else {
 		// login phase, wrong password
 		// delete written 
-		uart_print("\r                                                \r");
-		
+		clear_line();
 		uart_print("Incorrect password! Try again: ");
 	}
 }
 
 void aem_handler(){
 	
-	if (buff_index > 6 || buff_index < 2) {
-		uart_print("\r                                                  \r"); // ???
+	if (buff_index > 6 || buff_index <= 2) {
+		clear_line();
 		uart_print("Please enter a valid AEM: ");
 		return;
 	}
 
 	for (int i = 0; i < buff_index - 1; i++){
 		if ((buff[i] < '0' || buff[i] > '9')){
-			uart_print("\r                                                  \r"); // ???
+			clear_line();
 			uart_print("Please enter a valid AEM: ");
 			return;
 		}
@@ -309,7 +310,7 @@ void aem_handler(){
 	if (aem_sum < 2) aem_sum = 2;
 	else if (aem_sum > 10) aem_sum = 10;
 	MODE = MAIN;
-	uart_print("\r                                                  \r"); // ???
+	clear_line();
 	uart_menu_handler(selection, 1);
 	NVIC_EnableIRQ(TIM2_IRQn);
 	TIM2->CR1 |= TIM_CR1_CEN;	   // Start TIM2
@@ -399,7 +400,7 @@ int main() {
 	RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;  // Enable clock for TIM3
 	// set the amount of ticks relative to the clock speed
 	TIM3->PSC = 15999;  // Prescaler: divide 16 MHz by 16000 = 1 kHz
-	TIM3->ARR = 2000;   // Auto-reload: 2000 ticks at 1 kHz = period sec
+	TIM3->ARR = 1999;   // Auto-reload: 2000 ticks at 1 kHz = period sec
 	TIM3->DIER |= TIM_DIER_UIE;     // Enable update interrupt (overflow interrupt)
 	NVIC_SetPriority(TIM3_IRQn, 4);  // set the priority
 	
@@ -475,13 +476,10 @@ int main() {
 						DHT11_data_handler();
 						break;
 					case 3:
-						__disable_irq();
 						DHT11_read_data(DHT11);
 						DHT11_data_handler();
-						__enable_irq();
 						break;
 				}
-				buff_index = 0;
 			} else if (rx_char == 0x7F && buff_index > 0) { // Handle backspace character
 					buff_index--; // Move buffer index back
 					uart_tx(rx_char); // Send backspace character to erase on terminal
@@ -490,11 +488,9 @@ int main() {
 				buff[buff_index++] = (char)rx_char; // Store digit or dash in buffer
 				uart_tx(rx_char); // Echo digit or dash back to terminal
 				
-				if (MODE == MAIN && rx_char != '\r'){ // a character has been typed and we are not on login phase, so it's a command 
+				if (MODE == MAIN && rx_char != '\r' && buff_index == 1){ // a character has been typed and we are not on login phase, so it's a command 
 					// update menu, hide highlight
-					__disable_irq();
 					uart_menu_handler(selection, 0);
-					__enable_irq();
 				}
 			}
 			
