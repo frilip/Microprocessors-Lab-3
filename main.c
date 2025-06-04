@@ -21,14 +21,17 @@
 #define MENU_LINES 9
 #define MAX_STATE_TIME 700
 
+/*         Define the pin numbers for clarity         */
 #define DHT11 PC_8
 #define TOUCH PC_6
 #define LED PC_5
 
+/*         Create a struct to hold the UI menu options         */
 typedef struct {
 	const char *text;
 } menu_text;
 
+/*         Define all global constants and variables for the UI interface         */
 menu_text test[4] = {"1. Increase period of read/write data by 1s (max 10s).", 
 														"2. Decrease period of read/write data by 1s (min 2s.)",
 														"3. Switch between temperature/ humidity/ both.",
@@ -40,7 +43,7 @@ const char *highlight_back = "\033[0m";
 char display_message[1500];
 int aem_sum;
 bool danger = false;
-bool print_mode = true;
+bool delete_mode = false;
 bool print_menu = false;
 bool update_values = false;
 bool update_touch_sensor = false;
@@ -49,10 +52,11 @@ unsigned int touch_sensor_clicks = 0;
 uint8_t reading_period = 6;
 uint8_t selection = 0;
 
+/*         Define all global variables for the UART interface         */
 Queue rx_queue;       // Queue for storing received characters
 char buff[BUFF_SIZE]; // The UART read string will be stored here
 uint32_t buff_index;
-														
+
 enum DHT11_output_options {
 	BOTH = 0,
 	FREQUENCY,
@@ -70,14 +74,6 @@ enum DHT11_output_options display_cases = BOTH;
 float temperature;
 int humidity;
 
-/*
-enum mode_options {
-	MODE_A = 0,
-	MODE_B
-};
-enum mode_options mode = MODE_A;
-*/
-
 char mode = 'A';
 uint8_t safe_values_count = 0;
 
@@ -85,6 +81,10 @@ uint8_t safe_values_count = 0;
 /* -----------------   HANDLER FUNCTIONS - START   ----------------- */
 /* ----------------------------------------------------------------- */
 
+/*
+This function handles the UI menu creation by concatenating the
+different options appropriately, depending on the highlighted option.
+*/
 void uart_menu_handler(uint8_t selection, bool highlight) {
 	
 	// Move up enough lines to clear the previous menu instance
@@ -95,7 +95,7 @@ void uart_menu_handler(uint8_t selection, bool highlight) {
 	display_message[0] = '\0';
 	strcat(display_message, menu);
 	for (int i = 0; i < 4; i++) {
-		if (i == selection && highlight) {
+		if (i == selection && highlight) { // "Plug" the highlight character at the position specified by the selection variable
 			strcat(display_message, highlight_front);
 			strcat(display_message, test[i].text);
 			strcat(display_message, highlight_back);
@@ -108,11 +108,17 @@ void uart_menu_handler(uint8_t selection, bool highlight) {
 	strcat(display_message, "Command: ");
 	uart_print(display_message);
 	
+	// After refreshing the menu return at the point where the user has typed
 	for (int i = 0; i < buff_index; i++) {
 		uart_print("\033[1C");
 	}
 }
 
+/*
+This function handles the humidity and temperature display.
+Depending on the user options it displays only the temperature,
+only the humidity or both.
+*/
 void DHT11_data_handler() {		
 	
 	switch (display_cases){
@@ -128,8 +134,8 @@ void DHT11_data_handler() {
 	}
 	
 	
-	// print in correct place
-	uart_print("\033[?25l"); // Hide the cursor
+	uart_print("\033[?25l"); // Hide the cursor (this is for display purposes only, it "hides PuTTY's refresh rate")
+	// print in correct place (don't refresh the whole menu)
 	uart_print("\033[A\033[A\r                            ");
 	uart_print(display_message);
 	// return the cursor where it was, buff_index + 9 to the right (9 is from the "Command: " text)
@@ -139,6 +145,9 @@ void DHT11_data_handler() {
 	uart_print("\033[?25h"); // Reveal the cursor
 }
 
+/*
+This function updates the TIM2 timer that is responsible for triggering a DHT11 read
+*/
 void update_timer_frequency(uint32_t new_reading_period_seconds) {
     TIM2->CR1 &= ~TIM_CR1_CEN;  // 1. Stop the timer
 
@@ -150,6 +159,12 @@ void update_timer_frequency(uint32_t new_reading_period_seconds) {
     TIM2->CR1 |= TIM_CR1_CEN;  // 5. Restart the timer
 }
 
+/*
+This observer function is responsible for keeping track of the time (in
+microseconds) the DTH11 has pulled or released the data line. It has a timeout
+feature to avoid deadlocks. The "state" variable either holds logical 0 or 1,
+depending on the state we anticipate DHT11 to be NEXT.
+*/
 int observer(Pin pin, int state) {
 	unsigned int n = 0;
 	
@@ -164,13 +179,23 @@ int observer(Pin pin, int state) {
 	return 0;
 }
 
+/*
+This is the function that reads data from the DHT11.
+It can be broken down into 3 parts.
+For the first 2 parts interrupts are disabled to avoid messing with
+the handshake and receiving of the data timings.
+1) The first part (before the while statement) is responsible
+for completing the handshake between the MCU and the sensor.
+2) The second part (inside the while statement) is responsible for receiving
+the data.
+3) The third part, evaluates the checksum and decodes the received bits into
+humidity and temperature readings.
+*/
 void DHT11_read_data(Pin pin) {
 	uint8_t Bits = 0;
-	uint8_t Packets[DHT11_MAX_BYTE_PACKETS] = {0};
+	uint8_t Packets[DHT11_MAX_BYTE_PACKETS] = {0}; // We need 5 bytes (5 * 8 bits = 40 total bits transmitted)
 	uint8_t PacketIndex = 0;
 	uint8_t state_time;
-	
-	__disable_irq();
 	
 	gpio_set_mode(DHT11, Output);
 	// PULLING the Line to Low and waits for 20ms
@@ -180,7 +205,6 @@ void DHT11_read_data(Pin pin) {
 	gpio_set(DHT11, 1);
 	delay_us(40);
 
-	// __disable_irq();
 	gpio_set_mode(DHT11, Input);
 
 	// If the Line is still HIGH, that means DHT11 is not responding
@@ -211,28 +235,30 @@ void DHT11_read_data(Pin pin) {
 		// Now we will just count the us it stays HIGH
 		// 28us means 0
 		// 70us means 1
-		state_time = 2 * observer(DHT11, 0);
+		state_time = 10 * observer(DHT11, 0);
 		if (!(state_time)) {
 			uart_print("TIMEOUT 2!\r\n");
 		}
 
-		Packets[PacketIndex] = Packets[PacketIndex] << 1;
-		Packets[PacketIndex] |= (state_time > 10); // 50us is good in between
+		Packets[PacketIndex] = Packets[PacketIndex] << 1; // We shift left inside the byte to store the relevant bits
+		Packets[PacketIndex] |= (state_time > 50); // 50us is good in between
 		Bits++;
-		if(!(Bits % 8)) PacketIndex++;
+		if(!(Bits % 8)) PacketIndex++; // The packe index changes every 8 bits
 	}
 	
 	__enable_irq();
 	
 	// Last 8 bits are Checksum, which is the sum of all the previously transmitted 4 bytes
-	if(Packets[4] != (Packets[0] + Packets[1] + Packets[2] + Packets[3])) {
+	if (Packets[4] != (Packets[0] + Packets[1] + Packets[2] + Packets[3])) {
 		uart_print("MISMATCH!\r\n");
 	}
 	
+	// Convert the values to human readable format
 	humidity = Packets[0] + (Packets[1] * 0.1f);
 	temperature = Packets[2] + (Packets[3] * 0.1f);
 	
-	if (temperature > 35 || humidity > 80) {
+	// This checks whether the values received exceed a dangerous threshold
+	if (temperature > 35 || humidity > 80) { // The "software reset" danger values have bigger priority than the...
 		dangerous_values++;
 		if (dangerous_values % 3 == 0) {
 			__disable_irq();
@@ -241,7 +267,7 @@ void DHT11_read_data(Pin pin) {
 			delay_ms(1000);
 			NVIC_SystemReset();
 		}
-	} else if (mode == 'B' && (temperature > 25 || humidity > 60)) {
+	} else if (mode == 'B' && (temperature > 25 || humidity > 60)) { // ...mode B danger values
 		safe_values_count = 0;
 		danger = true;
 	} else if (danger && temperature < 25 && humidity < 60) {
@@ -252,11 +278,19 @@ void DHT11_read_data(Pin pin) {
 	}
 }
 
+/*
+A trite function to clear the current line (in full screen mode)
+*/
 void clear_line(){
 	sprintf(display_message, "\r%*s\r", 180, "");
 	uart_print(display_message);
 }
 
+/*
+This is the handler function for UART inputs during the MENU phase.
+Since in our implementation the only UART command that can be issued
+is the "status" command we renamed it as such. A better naming convention
+*/
 void status_handler() {
 	
 	// update menu, show higlight
@@ -268,16 +302,21 @@ void status_handler() {
 	
 	if (!strcmp(buff, "status")){
 		// STATUS ACTION HERE
-		NVIC_EnableIRQ(TIM3_IRQn);
-		TIM3->CR1 |= TIM_CR1_CEN;
 		DHT11_read_data(DHT11);
 		DHT11_data_handler();
 		sprintf(display_message, "\033[A\r                            MODE: %c, Number of MODE changes: %d\r\n\033[9C", mode, touch_sensor_clicks);
 		uart_print(display_message);
-		print_mode = true;
+		// NVIC_EnableIRQ(TIM3_IRQn);
+		TIM3->CNT = 0;
+		TIM3->SR = 0;
+		TIM3->CR1 |= TIM_CR1_CEN;
+		delete_mode = false;
 	}
 }
 
+/*
+This is the handler function for UART inputs during the PASSWORD phase.
+*/
 void password_handler() {
 	if (!strcmp(buff, password)){
 		MODE = AEM;
@@ -291,6 +330,9 @@ void password_handler() {
 	}
 }
 
+/*
+This is the handler function for UART inputs during the AEM phase.
+*/
 void aem_handler(){
 	
 	if (buff_index > 6 || buff_index <= 2) {
@@ -307,6 +349,7 @@ void aem_handler(){
 		}
 	}
 	aem_sum = (int)buff[buff_index - 3] + (int)buff[buff_index - 2] - 96; // We subtract 96 to transform to the actual
+	// We chose to respect the limits 2 <= update_rate <= 10
 	if (aem_sum < 2) aem_sum = 2;
 	else if (aem_sum > 10) aem_sum = 10;
 	MODE = MAIN;
@@ -353,13 +396,15 @@ void TIM3_IRQHandler(void) {
 		TIM3->SR &= ~TIM_SR_UIF;		// Clear the flag immediately
 	}
 	
-	print_mode = false;
+	delete_mode = true;
 }
 
+/*      Interrupt Sevice Routine for LED blinking      */
 void led_blinking_isr() {
 	if (danger) gpio_toggle(LED);
 }
 
+/*      Interrupt Sevice Routine for the touch sensor      */
 void touch_sensor_isr(int status) {
 	
 	touch_sensor_clicks++;
@@ -396,13 +441,14 @@ int main() {
 	TIM2->DIER |= TIM_DIER_UIE;     // Enable update interrupt (overflow interrupt)
 	NVIC_SetPriority(TIM2_IRQn, 3);  // set the priority
 	
-	// Initialize the temperature / humidity timer interrupt
+	// Initialize the MODE timer
 	RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;  // Enable clock for TIM3
 	// set the amount of ticks relative to the clock speed
 	TIM3->PSC = 15999;  // Prescaler: divide 16 MHz by 16000 = 1 kHz
 	TIM3->ARR = 1999;   // Auto-reload: 2000 ticks at 1 kHz = period sec
 	TIM3->DIER |= TIM_DIER_UIE;     // Enable update interrupt (overflow interrupt)
 	NVIC_SetPriority(TIM3_IRQn, 4);  // set the priority
+	NVIC_EnableIRQ(TIM3_IRQn);
 	
 	// Initialize the SysTick timer for the LED blinking
 	timer_set_callback(led_blinking_isr);
@@ -432,7 +478,7 @@ int main() {
 		do {
 			// Wait until a digit or dash is received in the queue
 			rx_char = 0;
-			while (!queue_dequeue(&rx_queue, &rx_char) && print_mode && !update_values && !update_touch_sensor)
+			while (!queue_dequeue(&rx_queue, &rx_char) && delete_mode && !update_values && !update_touch_sensor)
 				__WFI(); // Wait for Interrupt
 			
 			if (update_values) {
@@ -448,6 +494,17 @@ int main() {
 				update_touch_sensor = false;
 			}
 			
+			if (MODE == MAIN && delete_mode) {
+				sprintf(display_message, "\033[A\r                                                                 \r\n\033[9C");
+				uart_print(display_message);
+				for (int i = 0; i < buff_index; i++) {
+					uart_print("\033[1C");
+				}
+				// NVIC_DisableIRQ(TIM3_IRQn);
+				TIM3->CR1 &= ~TIM_CR1_CEN;
+				delete_mode = false;
+			}
+			
 			if (rx_char == 0x9 && MODE == MAIN && buff_index == 0) { // if buff_index > 0 then a command is being written
 				selection = (selection + 1) % 4;
 				uart_print("\033[?25l");
@@ -457,6 +514,7 @@ int main() {
 			}
 		
 			if (MODE == MAIN && rx_char == '\r' && buff_index == 0) {
+				// uart_print("ENTERED\r\n");
 				// no command was written
 				// act based on selected option
 				rx_char = 0; // We zero it out so it doesn't escape the while...
@@ -478,6 +536,13 @@ int main() {
 					case 3:
 						DHT11_read_data(DHT11);
 						DHT11_data_handler();
+						sprintf(display_message, "\033[A\r                            MODE: %c\r\n\033[9C", mode);
+						uart_print(display_message);
+						// NVIC_EnableIRQ(TIM3_IRQn);
+						TIM3->CNT = 0;
+						TIM3->SR = 0;
+						TIM3->CR1 |= TIM_CR1_CEN;
+						delete_mode = false;
 						break;
 				}
 			} else if (rx_char == 0x7F && buff_index > 0) { // Handle backspace character
@@ -494,18 +559,13 @@ int main() {
 				}
 			}
 			
-			if (MODE == MAIN && !print_mode) {
-				sprintf(display_message, "\033[A\r                                                                 \r\n\033[9C");
-				uart_print(display_message);
-				NVIC_DisableIRQ(TIM3_IRQn);
-				print_mode = true;
-			}
-			
 		} while (rx_char != '\r' && buff_index < BUFF_SIZE); // Continue until Enter key or buffer full
 		
 		// Replace the last character with null terminator to make it a valid C string
 		buff[buff_index - 1] = '\0';
 		
+		// This is the main switch for determining how to handle a word entered by the user
+		// It is universal for all three input phases.
 		switch (MODE) {
 			case MAIN:
 				status_handler();
