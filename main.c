@@ -282,8 +282,7 @@ void DHT11_read_data(Pin pin) {
 A trite function to clear the current line (in full screen mode)
 */
 void clear_line(){
-	sprintf(display_message, "\r%*s\r", 180, "");
-	uart_print(display_message);
+	uart_print("\033[2K\r");  // Clear entire line and return to beginning
 }
 
 /*
@@ -324,7 +323,7 @@ void password_handler() {
 		uart_print("Enter you AEM: ");
 	} else {
 		// login phase, wrong password
-		// delete written 
+		// delete written
 		clear_line();
 		uart_print("Incorrect password! Try again: ");
 	}
@@ -456,7 +455,8 @@ int main() {
 	__enable_irq(); // Enable interrupts
 	
 	// clear visible page
-	uart_print("\033[2J\033[H\n");
+	uart_print("\033[2J\033[H");
+	uart_print("Please use me on full screen, otherwise I misbehave\r\n");
 	
 	// Initialize the Touch sensor
 	gpio_set_mode(TOUCH, PullDown); // Set touch sensor out pin to PullDown (input)
